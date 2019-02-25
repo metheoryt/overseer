@@ -1,6 +1,6 @@
 from click.testing import CliRunner
 
-from ovs.scripts.cli import cli
+from raekwon.scripts.cli import cli
 
 
 def test_cli_count():

@@ -1,6 +1,6 @@
 from datetime import datetime
 
-from ovs.db import make_source_model
+from raekwon.db import make_source_model
 from .schema import RecordSchema
 from sqlalchemy.orm import Query
 

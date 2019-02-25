@@ -1,5 +1,5 @@
-import ovs
+import raekwon
 
 
 def test_has_legs():
-    assert not ovs.has_legs
+    assert not raekwon.has_legs
