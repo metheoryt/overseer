@@ -10,7 +10,7 @@ from collections import namedtuple
 SourceData = namedtuple('SourceData', ['valid', 'trash'])
 
 
-def prepare_data(raw: pd.DataFrame, pk_name, schema):
+def prepare_data(raw: pd.DataFrame, schema):
     """
     исключает дубликаты, записи без pk, и записи, не прошедшие валидацию по схеме
 
@@ -25,10 +25,13 @@ def prepare_data(raw: pd.DataFrame, pk_name, schema):
         except ValidationError as e:
             return str(e.messages)
 
+    # отгружаем в отбросы дубликаты (один оставляем),
+    # записи с пустыми идентификаторами и провалившие валидацию
     raw['_message'] = raw.apply(validate_row, axis=1)
+    raw.loc[raw.index.duplicated(keep='last'), '_message'] = 'duplicated'
+    raw.loc[raw.index.isna(), '_message'] = 'pk is empty'
 
-    # отгружаем в отбросы
-    is_trash = raw[pk_name].duplicated(keep='last') | raw[pk_name].isna() | raw['_message'].isna()
+    is_trash = ~raw['_message'].isna()
 
     valid, trash = raw[~is_trash], raw[is_trash]
     valid.drop(columns='_message', inplace=True)
@@ -67,12 +70,23 @@ class RecordSource(metaclass=ABCMeta):
     """уникальное имя источника данных"""
 
     schema = None
-    """Схема данных
+    """Схема данных. Какие поля, какого формата, обязательны ли.
+    Несвалидированные по правилам этой схемы данные смержатся с остальными, 
+    но будут уже с пометкой "не сверено" и не будут участвовать в валидации цепочки
     :type: ma.Schema
     """
 
     pk_name = 'id'
-    """Название поля SID"""
+    """Название поля с уникальным "публичным" идентификатором записи"""
+
+    date_name = 'date'
+    """Название поля с датой операции. Служит идентификатором записи на временной шкале. 
+    Точность роли не играет, но важно чтобы за одну единицу времени всегда забирался полный набор операций.
+    Напрмер, если в качестве единицы времени будет выступать один день "2019-02-27", забирать операции 
+    за сегодня нельзя, потому что 
+    если сверщик уже один раз забрал данные за конкретный минимальный промежуток времени,
+    повторно за этот промежуток он операции не вставит 
+    """
 
     @abstractmethod
     def fetch_data(self, df: datetime, dt: datetime) -> pd.DataFrame:
