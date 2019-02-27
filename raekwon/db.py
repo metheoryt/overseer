@@ -1,13 +1,11 @@
-from itertools import chain
-
-from sqlalchemy.orm import sessionmaker, scoped_session
-from sqlalchemy.ext.declarative import declarative_base
-from sqlalchemy import MetaData
-import sqlalchemy as sa
-import marshmallow as ma
-from marshmallow import fields as f
 from datetime import datetime
 
+import marshmallow as ma
+import sqlalchemy as sa
+from marshmallow import fields as f
+from sqlalchemy import MetaData
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker, scoped_session
 
 metadata = MetaData()
 Session = scoped_session(sessionmaker())
@@ -39,7 +37,7 @@ def extract_columns_from_schema(schema: ma.Schema):
 
     columns = []
 
-    for field in fields:
+    for k, field in fields.items():
         col = reflect_field_to_column(field)
         columns.append(col)
 
@@ -49,15 +47,15 @@ def extract_columns_from_schema(schema: ma.Schema):
 def make_table_from_schema(name, schema: ma.Schema):
 
     basic_model_columns = (
-        sa.Column('sid', sa.String(), primary_key=True, nullable=False, unique=True),
-        # sa.Column('last_update', sa.DateTime, onupdate=datetime.now)
+        sa.Column('pk', sa.String(), primary_key=True, nullable=False, unique=True),
+        # если дата вставки и дата обновления отличаются
+        # это повод выкинуть операцию в результаты сверки
+        sa.Column('date_create', sa.DateTime, default=datetime.now),
+        sa.Column('last_update', sa.DateTime, onupdate=datetime.now),
     )
 
     additional_cols = extract_columns_from_schema(schema)
 
-    table = sa.Table(
-        name, metadata,
-        chain(basic_model_columns, additional_cols)
-    )
+    table = sa.Table(name, metadata, *basic_model_columns, *additional_cols)
 
     return table

@@ -12,6 +12,7 @@ sqlalchemy = "*"
 pandas = "*"
 raekwon = {editable = true,path = "."}
 marshmallow = "*"
+psycopg2 = "*"
 
 [requires]
 python_version = "3.6"

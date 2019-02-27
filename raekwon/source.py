@@ -1,4 +1,6 @@
 from datetime import datetime
+
+from raekwon.db import Session
 from .db import make_table_from_schema
 from sqlalchemy.orm import Query
 import pandas as pd
@@ -7,7 +9,7 @@ from marshmallow import ValidationError
 from collections import namedtuple
 
 
-SourceData = namedtuple('SourceData', ['valid', 'trash'])
+SourceData = namedtuple('SourceData', ['valid', 'invalid', 'trash'])
 
 
 def prepare_data(raw: pd.DataFrame, schema):
@@ -27,40 +29,29 @@ def prepare_data(raw: pd.DataFrame, schema):
 
     # отгружаем в отбросы дубликаты (один оставляем),
     # записи с пустыми идентификаторами и провалившие валидацию
-    raw['_message'] = raw.apply(validate_row, axis=1)
-    raw.loc[raw.index.duplicated(keep='last'), '_message'] = 'duplicated'
-    raw.loc[raw.index.isna(), '_message'] = 'pk is empty'
 
-    is_trash = ~raw['_message'].isna()
+    is_dup = raw.index.duplicated(keep='last')
+    is_na = raw.index.isna()
 
-    valid, trash = raw[~is_trash], raw[is_trash]
-    valid.drop(columns='_message', inplace=True)
+    dups, na_pks, raw = raw[is_dup], raw[is_na], raw[~(is_dup | is_na)]
+    dups.loc[:, '__msg'] = 'duplicated'
+    na_pks.loc[:, '__msg'] = 'pk missing'
+
+    raw.loc[:, '__msg'] = raw.apply(validate_row, axis=1)
+    is_invalid = ~raw['__msg'].isna()
+    invalid, raw = raw[is_invalid], raw[~is_invalid]
+
+    trash = pd.concat([dups, na_pks])
 
     if trash.empty:
         trash = None
 
-    # ВТОРОЙ ВАРИАНТ, через many=True схемы. По идее должно быть быстрее, но это не так удобно
-    # # сериализуем чтобы получить нормальные типы (в частности даты)
-    # serialized = json.loads(raw.to_json(orient='index', date_format='iso'))
-    # serialized = [{pk_name: k, **v} for k, v in serialized.items()]  # возвращаем pk
-    #
-    # invalid = []
-    # try:
-    #     valid = schema.load(serialized, many=True)
-    # except ValidationError as e:
-    #     valid = e.valid_data
-    #     # переносим несвалидированные записи полностью
-    #     # помечаем чё с ними не так
-    #     for i, k in e.messages.items():
-    #         bad_ts = valid[i]
-    #         bad_ts['_message'] = str(k)
-    #         invalid.append(bad_ts)
-    #     # очищаем данные от несвалидированных транзакций
-    #     valid = [v for i, v in enumerate(valid) if i not in e.messages.keys()]
-    # valid = pd.DataFrame(valid)
-    # invalid = pd.DataFrame(invalid)
+    if invalid.empty:
+        invalid = None
 
-    return SourceData(valid, trash)
+    raw.drop(columns='__msg', inplace=True)
+
+    return SourceData(raw, invalid, trash)
 
 
 class RecordSource(metaclass=ABCMeta):
@@ -89,7 +80,7 @@ class RecordSource(metaclass=ABCMeta):
     """
 
     @abstractmethod
-    def fetch_data(self, df: datetime, dt: datetime) -> pd.DataFrame:
+    def fetch_data(self, dfrom: datetime, dto: datetime) -> pd.DataFrame:
         """Получает (или пытается получить) данные, ограниченные по времени от df до dt
         :return: датафрейм
         """
@@ -102,23 +93,29 @@ class RecordSource(metaclass=ABCMeta):
 
     def kleek(self, df, dt):
         """
-        - забираем сырые данные
-        - исключаем дубликаты по индексу
-
-        - сохраняем в именованную таблицу
+        - получаем сырые данные
+        - чистим
+        - сохраняем в личную таблицу
 
         :param df: дата начала сверочного периода
         :param dt: дата конца сверочного периода
         :return:
         """
         raw = self.fetch_data(df, dt)
-        result = prepare_data(raw, self.pk_name, self.schema)
+        raw.set_index(self.pk_name, drop=True, inplace=True)
 
+        result = prepare_data(raw, self.schema)
+
+        # это основная таблица. В ней будут лежать данные этой конкретной коллекции
         table = make_table_from_schema(self.name, self.schema)
         table.create(checkfirst=True)
 
-
-
+        # пора экспортировать данные
+        # чё, просто наложением писать? пофиг ведь наверное
+        s = Session()
+        table.bind.executemany(table.insert(), result.valid.to_dict(orient='records'))
+        s.commit()
+        return table
 
 
 class Overseer:
