@@ -1,5 +1,3 @@
-import marshmallow as ma
-from marshmallow import fields as f
 
 
 class Verdict:
@@ -14,10 +12,3 @@ class Verdict:
         return f'<Verdict / {"reconciled" if self.reconciled else "non-reconciled"} ({"; ".join(self.verdicts)})'
 
 
-class RecordSchema(ma.Schema):
-
-    shared_id = f.Str(required=True)
-    """Единственное поле, требуемое от записи"""
-
-    date = f.DateTime(required=True)
-    """Второе важное поле, по которому можно будет фильтровать по времени. Должно быть всегда"""
